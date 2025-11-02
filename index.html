@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<title>審査官 ACTION Mobile｜丸住ケース</title>
+<style>
+  :root{
+    --bg:#070b12; --ink:#eaf2ff; --sub:#a9b9d2;
+    --cash:#22c55e; --trust:#38bdf8; --legal:#a78bfa; --danger:#ef4444; --gold:#facc15; --boost:#f472b6;
+    --glass: rgba(255,255,255,.08);
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:radial-gradient(1200px 800px at 50% -10%,#0e1726 0%,#070b12 60%,#070b12 100%);
+    color:var(--ink);
+    font:15px/1.6 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+    touch-action:manipulation; overflow:hidden
+  }
+  #wrap{position:fixed; inset:0; padding:calc(var(--safe-top)) calc(var(--safe-right)) calc(var(--safe-bottom)+28px) calc(var(--safe-left));}
+  #game{display:block; width:100%; height:100%;}
+  .legend{
+    position:fixed; top:calc(6px + var(--safe-top)); left:calc(6px + var(--safe-left));
+    display:flex; gap:6px; flex-wrap:wrap; z-index:11; max-width:min(96vw, 1200px)
+  }
+  .chip{
+    background:var(--glass); border:1px solid rgba(255,255,255,.12);
+    padding:4px 10px; border-radius:999px; color:#cfe2ff;
+    font-size:clamp(10px, 1.8vw, 12px);
+  }
+  .status{
+    position:fixed; top:calc(8px + var(--safe-top)); right:calc(12px + var(--safe-right));
+    text-align:right; font-weight:700; color:#fff; text-shadow:0 0 4px #000; z-index:11;
+    font-size:clamp(14px, 2.2vw, 18px);
+  }
+  .world{
+    position:fixed; inset:0; background:rgba(255,255,255,0.9); color:#000;
+    display:flex; align-items:center; justify-content:center;
+    font-size:clamp(32px, 7vw, 64px); font-weight:800; font-family: 'Impact', system-ui, sans-serif;
+    text-shadow:0 0 8px yellow; opacity:0; pointer-events:none; transition:opacity .2s; z-index:10;
+  }
+  .world.active{opacity:1; animation:flash 1s ease-out 0s 3;}
+  @keyframes flash{0%{opacity:1;}50%{opacity:.25;}100%{opacity:1;}}
+
+  .ticker{
+    position:fixed; left:0; right:0; bottom:0; height:clamp(22px, 4.2vw, 28px);
+    background:linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    border-top:1px solid rgba(255,255,255,.1);
+    display:flex; align-items:center; overflow:hidden; z-index:11;
+    font-size:clamp(10px, 1.9vw, 12px); color:#cfe2ff;
+    padding:0 calc(4px + var(--safe-left)) 0 calc(4px + var(--safe-left));
+  }
+  .ticker-inner{white-space:nowrap; will-change:transform; animation:marquee 20s linear infinite; padding-left:100%;}
+  @keyframes marquee{from{transform:translateX(0)} to{transform:translateX(-100%)}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" aria-label="審査官アクションゲーム（モバイル対応）"></canvas>
+</div>
+
+<div class="legend">
+  <span class="chip">💚 緑=バッテンビーム（5×） / 💙 青=十字架ビーム（5×）</span>
+  <span class="chip">💜 紫=周囲掃討（半径160S、ELITEはHP-1）</span>
+  <span class="chip">💖 ピンク=時間停止（ザ・ワールド 3秒）</span>
+  <span class="chip">🔥 強敵=HP3・高速追尾・接触20ダメ</span>
+</div>
+<div class="status" id="status">Time: 60s<br>HP: 100%<br>資源: 0%</div>
+<div class="world" id="world">ザ・ワールド</div>
+<div class="ticker"><div class="ticker-inner" id="ticker"></div></div>
+
+<script>
+const cvs = document.getElementById('game');
+const ctx = cvs.getContext('2d',{alpha:true, desynchronized:true});
+const statusEl = document.getElementById('status');
+const worldEl = document.getElementById('world');
+
+// -------------------- レスポンシブ設定 --------------------
+let DPR = 1, CSS_W = 0, CSS_H = 0, W = 0, H = 0;
+function resizeCanvas(){
+  DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+  CSS_W = Math.max(320, Math.floor(window.innerWidth));
+  CSS_H = Math.max(320, Math.floor(window.innerHeight));
+  cvs.style.width = CSS_W + "px";
+  cvs.style.height = CSS_H + "px";
+  cvs.width  = Math.floor(CSS_W * DPR);
+  cvs.height = Math.floor(CSS_H * DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  W = CSS_W; H = CSS_H;
+
+  S = Math.max(0.6, Math.min(1.5, Math.min(W,H) / 720));
+  BASE.updateFromScale();
+}
+window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 100));
+document.addEventListener('DOMContentLoaded', resizeCanvas);
+
+// -------------------- スケール基準 --------------------
+let S = 1;
+const BASE = {
+  updateFromScale(){
+    player.r = Math.round(18 * S);
+    player.speed = 6 * S * 1.0;
+    PARAM.BEAM_SIZE = Math.round(20 * S);
+    PARAM.BEAM_HIT  = Math.round(20 * S);
+    PARAM.BURST_RADIUS = Math.round(160 * S);
+    PARAM.ELITE_R_MIN = Math.round(22 * S);
+    PARAM.ELITE_R_MAX = Math.round(28 * S);
+    PARAM.NORMAL_R_MIN = Math.round(12 * S);
+    PARAM.NORMAL_R_MAX = Math.round(18 * S);
+  }
+};
+
+// -------------------- 定数・状態 --------------------
+const RES_MULT = 0.75;
+const PARAM = {
+  BEAM_SIZE: 20,
+  BEAM_HIT: 20,
+  BURST_RADIUS: 160,
+  ELITE_R_MIN: 22, ELITE_R_MAX: 28,
+  NORMAL_R_MIN: 12, NORMAL_R_MAX: 18,
+  ELITE_RATIO: 0.15,
+  ELITE_HP: 3,
+  ELITE_TOUCH_DMG: 20
+};
+
+const blackHumor = [
+  "【速報】東京地裁の鐘が鳴る──でもゲームは続く。",
+  "『支援交渉中』※演出です。スコアには影響しません。",
+  "スポンサー選定：あなたのクリック速度が有利です（当社比）。",
+  "財務DD：敵は勝手に自己開示（爆散）。",
+  "計画認可見込み：タイムが残っていれば、だいたい何とかなる。",
+  "管財人コメント：プレイヤーの指先、優先弁済。"
+];
+document.getElementById('ticker').textContent = "　" + blackHumor.join("　｜　");
+
+const state = {
+  running: true,
+  time: 60,
+  hp: 100,
+  resource: 0,
+  pickups: [],
+  hazards: [],
+  particles: [],
+  beams: [],
+  mouseX: undefined,
+  mouseY: undefined,
+  timeStop: 0,
+  last: 0
+};
+
+const player = {x:360,y:432,vx:0,vy:0,speed:6,r:18,iframes:0};
+state.mouseX = player.x;
+state.mouseY = player.y;
+
+// -------------------- ユーティリティ --------------------
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function rand(a,b){return a+Math.random()*(b-a)}
+function dist(ax,ay,bx,by){const dx=ax-bx,dy=ay-by;return Math.hypot(dx,dy)}
+function lerp(a,b,t){return a+(b-a)*t}
+function neonCircle(x,y,r,colors){
+  const grd = ctx.createRadialGradient(x,y, r*0.2, x,y, r);
+  colors.forEach((c,i)=>grd.addColorStop(i/(colors.length-1), c));
+  ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+}
+function trail(x,y,c){state.particles.push({x,y,vx:rand(-1,1),vy:rand(-1,1),a:1,c})}
+
+// -------------------- ピックアップ種 --------------------
+const TYPES = {
+  CASH:  {kind:'CASH',  color1:'#22c55e', color2:'#a7f3d0', score:10, m:[+10], beam:'x'},
+  TRUST: {kind:'TRUST', color1:'#38bdf8', color2:'#bae6fd', score:10, m:[+10], beam:'cross'},
+  LEGAL: {kind:'LEGAL', color1:'#a78bfa', color2:'#e9d5ff', score:10, m:[+10], burst:true},
+  BOOST: {kind:'BOOST', color1:'#f472b6', color2:'#fbcfe8', score:20, m:[+20], stop:true}
+};
+
+function spawnPickup(){
+  const pool = [TYPES.CASH, TYPES.TRUST, TYPES.LEGAL];
+  if (Math.random() < 0.2) pool.push(TYPES.BOOST);
+  const t = pool[Math.floor(Math.random() * pool.length)];
+  const m = Math.round(28 * S);
+  const p = {t, x:rand(m,W-m), y:rand(m,H-m), r:Math.round(16*S), life:240};
+  state.pickups.push(p);
+}
+
+// -------------------- 敵生成（赤専用追加に対応） --------------------
+function spawnHazard(eliteFlag){
+  let elite;
+  if (eliteFlag === false){
+    elite = false; // 赤（通常）を強制
+  } else {
+    elite = Math.random() < PARAM.ELITE_RATIO; // 通常の比率で判定
+  }
+
+  const baseSpeed = elite ? rand(1.6, 2.4) : rand(1.2, 2.0);
+  const r = elite ? rand(PARAM.ELITE_R_MIN, PARAM.ELITE_R_MAX)
+                  : rand(PARAM.NORMAL_R_MIN, PARAM.NORMAL_R_MAX);
+  const h = {
+    x: rand(0, W),
+    y: rand(0, H * 0.2),
+    r,
+    vx: rand(-1, 1) * baseSpeed * S,
+    vy: rand(0.6, 1.3) * baseSpeed * S,
+    elite,
+    hp: elite ? PARAM.ELITE_HP : 1
+  };
+  state.hazards.push(h);
+}
+
+// -------------------- 入力（マウス/タッチ） --------------------
+function updateMouseLike(e){
+  const rect = cvs.getBoundingClientRect();
+  const cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0]?.clientX);
+  const cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0]?.clientY);
+  if (cx == null || cy == null) return;
+  state.mouseX = (cx - rect.left) / rect.width * W;
+  state.mouseY = (cy - rect.top)  / rect.height * H;
+}
+cvs.addEventListener('pointermove', updateMouseLike, {passive:true});
+cvs.addEventListener('mousemove',   updateMouseLike, {passive:true});
+cvs.addEventListener('touchmove',   updateMouseLike, {passive:true});
+window.addEventListener('mousemove', updateMouseLike, {passive:true});
+window.addEventListener('touchmove', updateMouseLike, {passive:true});
+cvs.addEventListener('pointerenter', updateMouseLike, {passive:true});
+cvs.addEventListener('pointerdown',  updateMouseLike, {passive:true});
+cvs.style.touchAction = 'none';
+
+// -------------------- 攻撃（緑/青ビーム、紫掃討） --------------------
+function emitShapeBeam(type){
+  const speed = 14 * S;
+  const hit = PARAM.BEAM_HIT;
+  const size = PARAM.BEAM_SIZE;
+  const dirs = type==='x'
+    ? [[1,1],[-1,1],[1,-1],[-1,-1]]
+    : [[1,0],[-1,0],[0,1],[0,-1]];
+  for(const [dx,dy] of dirs){
+    state.beams.push({
+      mode:'shape',
+      x:player.x, y:player.y,
+      vx:dx*speed, vy:dy*speed,
+      a:1, size, hit, life: 40
+    });
+  }
+}
+
+function areaBurst(x,y){
+  for(let angle=0; angle<360; angle+=18){
+    const rad = angle * Math.PI / 180;
+    const dx = Math.cos(rad) * 10 * S;
+    const dy = Math.sin(rad) * 10 * S;
+    state.beams.push({mode:'burst',x,y,vx:dx,vy:dy,a:1,size:PARAM.BEAM_SIZE,hit:PARAM.BEAM_HIT,life:25});
+  }
+  for(let k=0;k<36;k++) trail(x + rand(-8*S,8*S), y + rand(-8*S,8*S), '#d7b9ff');
+
+  for(let i=state.hazards.length-1;i>=0;i--){
+    const h = state.hazards[i];
+    if(dist(x,y,h.x,h.y) <= PARAM.BURST_RADIUS){
+      applyHitToHazard(i, 5*RES_MULT);
+    }
+  }
+}
+
+function applyHitToHazard(index, resGain){
+  const h = state.hazards[index];
+  if(!h) return;
+  h.hp -= 1;
+  for(let k=0;k<(h.elite?10:6);k++) trail(h.x,h.y, h.elite? '#ffb35c' : '#ff6b6b');
+  if(h.hp <= 0){
+    state.hazards.splice(index,1);
+    const gain = (h.elite ? resGain*3 : resGain);
+    state.resource = clamp(state.resource + gain, 0, 100);
+  }
+}
+
+// -------------------- 更新処理 --------------------
+function updateBeams(){
+  for(let i=state.beams.length-1;i>=0;i--){
+    const b=state.beams[i];
+    b.x+=b.vx; b.y+=b.vy;
+    b.a-=0.018;
+    if (b.life!==undefined){ b.life--; if(b.life<=0) b.a = 0; }
+
+    for(let j=state.hazards.length-1;j>=0;j--){
+      const h = state.hazards[j];
+      if(dist(b.x,b.y,h.x,h.y) < h.r + b.hit){
+        applyHitToHazard(j, 5*RES_MULT);
+      }
+    }
+    if(b.a<=0) state.beams.splice(i,1);
+  }
+}
+
+function updatePickups(){
+  for(let i=state.pickups.length-1;i>=0;i--){
+    const p=state.pickups[i]; p.life--; if(p.life<0){state.pickups.splice(i,1); continue;}
+    const d = dist(player.x,player.y,p.x,p.y);
+    if(d<160*S){ p.x = lerp(p.x, player.x, 0.02); p.y = lerp(p.y, player.y, 0.02); }
+    if(d < player.r + p.r){
+      state.pickups.splice(i,1);
+      for(let k=0;k<6;k++) trail(p.x, p.y, p.t.color1);
+
+      if(p.t.beam==='x'||p.t.beam==='cross') emitShapeBeam(p.t.beam);
+      if(p.t.stop){
+        state.timeStop = 180; // 3秒
+        worldEl.classList.add('active');
+        setTimeout(()=>worldEl.classList.remove('active'), 3000);
+      }
+      if(p.t.burst) areaBurst(player.x, player.y);
+
+      state.resource = clamp(state.resource + (p.t.m[0] || 0)*RES_MULT, 0, 100);
+    }
+  }
+}
+
+function updateHazards(){
+  for(let i=state.hazards.length-1;i>=0;i--){
+    const h=state.hazards[i];
+    if(state.timeStop>0) continue;
+
+    h.x+=h.vx; h.y+=h.vy;
+    if(h.x<0||h.x>W) h.vx*=-1; if(h.y<0||h.y>H) h.vy*=-1;
+
+    const dx = player.x - h.x, dy = player.y - h.y;
+    const d=Math.hypot(dx,dy)+1e-6; 
+    const seek = h.elite ? 0.018 : 0.01;
+    h.vx += (dx/d)*seek * S; h.vy += (dy/d)*seek * S;
+
+    if(player.iframes===0 && dist(player.x,player.y,h.x,h.y) < player.r + h.r){
+      player.iframes = 30;
+      for(let k=0;k<12;k++) trail(player.x, player.y, '#ff6b6b');
+      state.hp = clamp(state.hp - (h.elite? PARAM.ELITE_TOUCH_DMG : 10), 0, 100);
+    }
+  }
+}
+
+function movePlayer(){
+  const dx = state.mouseX - player.x;
+  const dy = state.mouseY - player.y;
+  const d = Math.hypot(dx, dy) + 1e-6;
+  const ax = dx / d, ay = dy / d;
+  const sp = player.speed;
+  player.vx = lerp(player.vx, ax * sp, 0.6);
+  player.vy = lerp(player.vy, ay * sp, 0.6);
+  player.x = clamp(player.x + player.vx, player.r, W - player.r);
+  player.y = clamp(player.y + player.vy, player.r, H - player.r);
+  if(player.iframes>0) player.iframes--;
+}
+
+// -------------------- 描画 --------------------
+function render(){
+  ctx.clearRect(0,0,W,H);
+
+  state.pickups.forEach(p=>neonCircle(p.x,p.y,p.r,[p.t.color2+'55',p.t.color1+'cc']));
+
+  state.hazards.forEach(h=>{
+    if(h.elite){
+      neonCircle(h.x,h.y,h.r,['#ffb35c33','#ff7a1fcc']);
+    }else{
+      neonCircle(h.x,h.y,h.r,['#ff4d4d33','#ff1f1fcc']);
+    }
+  });
+
+  state.beams.forEach(b=>{
+    ctx.globalAlpha=b.a;
+    ctx.fillStyle='#facc15';
+    ctx.fillRect(b.x - b.size/2, b.y - b.size/2, b.size, b.size);
+    ctx.globalAlpha=1;
+  });
+
+  neonCircle(player.x,player.y, player.r+8,['#b9d7ffcc','#00000000']);
+  ctx.fillStyle = '#eaf2ff';
+  ctx.beginPath(); ctx.arc(player.x,player.y,player.r,0,Math.PI*2); ctx.fill();
+
+  for(let i=state.particles.length-1;i>=0;i--){
+    const p=state.particles[i]; p.x+=p.vx; p.y+=p.vy; p.a-=0.03;
+    if(p.a<=0){state.particles.splice(i,1);continue;}
+    ctx.globalAlpha=p.a; ctx.fillStyle=p.c; ctx.fillRect(p.x,p.y,3*S,3*S); ctx.globalAlpha=1;
+  }
+
+  statusEl.innerHTML = `Time: ${Math.ceil(state.time)}s<br>HP: ${Math.round(state.hp)}%<br>資源: ${Math.round(state.resource)}%`;
+}
+
+// -------------------- ループ --------------------
+function tick(ts){
+  if (!state.last) state.last = ts;
+  const dt = ts - state.last;
+  state.last = ts;
+
+  if(state.timeStop>0){
+    state.timeStop -= dt/16;
+    if (state.timeStop < 0) state.timeStop = 0;
+  } else {
+    state.time -= dt / 1000;
+  }
+
+  if (state.time <= 0 || state.hp <= 0) {
+    state.running = false;
+    const reason = state.time <= 0 ? "時間切れ" : "HP枯渇";
+    const msg = (state.hp<=0)
+      ? "【東京地裁の鐘が鳴る】\n——でも次は間に合う。"
+      : "【計画認可ならず】\n——次回はもう少しだけ迅速に。";
+    alert(`${msg}\n終了理由: ${reason}\n資源: ${Math.round(state.resource)}%`);
+    return;
+  }
+
+  // 出現頻度：全体を1.5倍（0.144）、さらに赤専用で0.048の追加スポーン
+  if (Math.random()<0.08)  spawnPickup();
+  if (Math.random()<0.144) spawnHazard();      // 全体1.5倍（赤＋ELITE）
+  if (Math.random()<0.048) spawnHazard(false); // 赤のみ追加（結果、赤は約2.25倍）
+
+  movePlayer();
+  updatePickups();
+  updateBeams();
+  updateHazards();
+  render();
+  if(state.running) requestAnimationFrame(tick);
+}
+
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
